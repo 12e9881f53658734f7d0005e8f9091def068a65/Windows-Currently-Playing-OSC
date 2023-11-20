@@ -1,8 +1,7 @@
 use std::net::UdpSocket;
 use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSession,
-    GlobalSystemMediaTransportControlsSessionManager,
-    GlobalSystemMediaTransportControlsSessionMediaProperties,
+    GlobalSystemMediaTransportControlsSessionManager
 };
 /*
 issues to fix:
