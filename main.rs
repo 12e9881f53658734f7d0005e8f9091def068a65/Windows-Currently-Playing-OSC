@@ -7,6 +7,7 @@ use windows::Media::Control::{
 /*
 TODO:
 get_playing_details doesnt have error handling
+add 5 second cool down
 */
 
 #[derive(Debug, Clone)]
