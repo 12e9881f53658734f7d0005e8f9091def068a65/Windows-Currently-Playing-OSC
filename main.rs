@@ -3,12 +3,12 @@ use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSession,
     GlobalSystemMediaTransportControlsSessionManager
 };
-/*
-issues to fix:
-close the udp socket
-I think the .clone() is causing memmory issues
 
+/*
+TODO:
+get_playing_details doesnt have error handling
 */
+
 #[derive(Debug, Clone)]
 struct MusicDetails {
     song_name: String,
@@ -26,18 +26,39 @@ impl MusicDetails {
     }
 }
 
-async fn get_current_session() -> Result<Option<GlobalSystemMediaTransportControlsSession>, windows::core::Error> {
-    let manager = GlobalSystemMediaTransportControlsSessionManager::RequestAsync()?.await?;
-    let session: GlobalSystemMediaTransportControlsSession = manager.GetCurrentSession()?;
+async fn get_current_session() -> GlobalSystemMediaTransportControlsSession {
+    loop {
+        let manager = match GlobalSystemMediaTransportControlsSessionManager::RequestAsync() {
+            Ok(manager) => {
+                match manager.await {
+                    Ok(manager) => manager,
+                    Err(e) => {
+                        eprintln!("1: {}", e);
+                        continue;
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("2: {}", e);
+                continue;
+            }
+        };
 
-    if session.SourceAppUserModelId()?.to_string().to_lowercase().contains("spotify.exe") {
-        return Ok(Some(session));
+        match manager.GetCurrentSession() {
+            Ok(session) => {
+                if session.SourceAppUserModelId().unwrap().to_string().to_lowercase().contains("spotify.exe") {
+                    return session
+                }
+            }
+            Err(e) => {
+                //eprintln!("Cant get session: {}", e);
+                continue;
+            }
+        } 
     }
-
-    return Ok(None);
 }
 
-async fn get_playing_details(session: GlobalSystemMediaTransportControlsSession) -> Result<MusicDetails, windows::core::Error> {
+async fn get_playing_details(session: &GlobalSystemMediaTransportControlsSession) -> Result<MusicDetails, windows::core::Error> {
     let session_details = session.TryGetMediaPropertiesAsync()?.await?;
 
     let currently_playing_details = MusicDetails {
@@ -49,7 +70,7 @@ async fn get_playing_details(session: GlobalSystemMediaTransportControlsSession)
     Ok(currently_playing_details)
 }
 
-fn send_music_details_to_vrc(music_details: &MusicDetails) -> std::io::Result<()>{
+fn send_music_details_to_vrc(udp_socket: &UdpSocket, music_details: &MusicDetails) -> std::io::Result<()>{
     let path = "/chatbox/input";
     let separator = [0x00, 0x00, 0x2c, 0x73, 0x54, 0x46, 0x00, 0x00, 0x00, 0x00];
 
@@ -58,6 +79,7 @@ fn send_music_details_to_vrc(music_details: &MusicDetails) -> std::io::Result<()
     } else {
         "Paused!".to_string()
     };
+
     let separatorb: &[u8] = &separator;
 
     let mut formatted_message = format!("{path}{separator}{message}", path=path, separator=String::from_utf8_lossy(separatorb), message=message);
@@ -65,35 +87,41 @@ fn send_music_details_to_vrc(music_details: &MusicDetails) -> std::io::Result<()
     let endingb: &[u8] = &[0x00, 0x00, 0x00];
     formatted_message.push_str(&String::from_utf8_lossy(endingb));
 
-    let udp_socket = UdpSocket::bind("0.0.0.0:0")?;
+    
     udp_socket.send_to(formatted_message.as_bytes(), ("127.0.0.1", 9000));
 
     Ok(())
 }
 
 fn are_structs_same(struct1:&MusicDetails, struct2:&MusicDetails) -> bool {
-    return struct1.song_name == struct2.song_name && struct1.song_artist == struct2.song_artist
+    return struct1.song_name == struct2.song_name && struct1.song_artist == struct2.song_artist && struct1.song_is_playing == struct2.song_is_playing
 }
 
 #[tokio::main]
 async fn main() {
+    let udp_socket = UdpSocket::bind("0.0.0.0:0").unwrap();
+    let mut session = get_current_session().await;
     let mut last_music_details: MusicDetails = MusicDetails::none();
 
     loop {
-        let h = get_current_session().await.unwrap();
-        let music_details: MusicDetails = get_playing_details(h.unwrap()).await.unwrap();
+        let music_details = match get_playing_details(&session).await {
+            Ok(details) => details,
+            Err(e) => {
+                eprintln!("Waiting for spotify; Error getting music details: {:?}", e);
+                session = get_current_session().await;
+                continue;
+            }
+        };
+
         if !are_structs_same(&music_details, &last_music_details) {
-            dbg!(&music_details);
-            send_music_details_to_vrc(&music_details);
+            send_music_details_to_vrc(&udp_socket, &music_details);
             last_music_details = music_details.clone();
         }
     }
 }
 
-
 /*
-122
+https://learn.microsoft.com/en-us/uwp/api/windows.media.systemmediatransportcontrols?view=winrt-22621
+https://learn.microsoft.com/en-us/uwp/api/windows.media.systemmediatransportcontrols.displayupdater?view=winrt-22621#windows-media-systemmediatransportcontrols-displayupdater
+https://learn.microsoft.com/en-us/uwp/api/windows.media.systemmediatransportcontrolsdisplayupdater?view=winrt-22621
 */
-//https://learn.microsoft.com/en-us/uwp/api/windows.media.systemmediatransportcontrols?view=winrt-22621
-//https://learn.microsoft.com/en-us/uwp/api/windows.media.systemmediatransportcontrols.displayupdater?view=winrt-22621#windows-media-systemmediatransportcontrols-displayupdater
-//https://learn.microsoft.com/en-us/uwp/api/windows.media.systemmediatransportcontrolsdisplayupdater?view=winrt-22621
