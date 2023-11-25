@@ -1,4 +1,5 @@
 use std::net::UdpSocket;
+use tokio::time::{sleep, Duration};
 use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSession,
     GlobalSystemMediaTransportControlsSessionManager
@@ -6,8 +7,10 @@ use windows::Media::Control::{
 
 /*
 TODO:
+Handle errors
+session not getting new session idk
+exiting if no session is present on launch - error handling
 get_playing_details doesnt have error handling
-add 5 second cool down
 */
 
 #[derive(Debug, Clone)]
@@ -105,6 +108,7 @@ async fn main() {
     let mut last_music_details: MusicDetails = MusicDetails::none();
 
     loop {
+        sleep(Duration::from_secs(2)).await;
         let music_details = match get_playing_details(&session).await {
             Ok(details) => details,
             Err(e) => {
